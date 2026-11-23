@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Invox | إنفوكس — استخراج بيانات الفواتير بالذكاء الاصطناعي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { theme: { extend: { fontFamily: { sans: ['Cairo', 'Tajawal', 'system-ui', 'sans-serif'] } } } };
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  html, body { font-family: 'Cairo', 'Tajawal', system-ui, sans-serif; background: #f8fafc; }
+  input[type=number]::-webkit-inner-spin-button { opacity: .4; }
+  .fade-in { animation: fade .25s ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body class="text-slate-800">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ---------- Icons (Lucide-style inline SVG, no external dependency) ---------- */
+const PATHS = {
+  upload: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M17 8l-5-5-5 5", "M12 3v12"],
+  camera: ["M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z", "M12 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"],
+  trash: ["M3 6h18", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"],
+  key: ["M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"],
+  sparkles: ["M12 3l1.9 5.8L20 10.7l-6.1 1.9L12 18.5l-1.9-5.9L4 10.7l6.1-1.9z", "M19 3v4", "M21 5h-4"],
+  download: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"],
+  x: ["M18 6L6 18", "M6 6l12 12"],
+  plus: ["M12 5v14", "M5 12h14"],
+  clock: ["M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20", "M12 6v6l4 2"],
+  file: ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M16 13H8", "M16 17H8", "M10 9H8"],
+  loader: ["M21 12a9 9 0 1 1-6.219-8.56"],
+  check: ["M20 6L9 17l-5-5"],
+  image: ["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M8.5 8.5a1 1 0 1 0 0 .01", "M21 15l-5-5L5 21"],
+  flask: ["M10 2v7.5L4 19a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-6-9.5V2", "M8.5 2h7", "M7 16h10"],
+  alert: ["M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20", "M12 8v4", "M12 16h.01"],
+  eye: ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"],
+  eyeoff: ["M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94", "M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19", "M1 1l22 22"],
+};
+function Icon({ name, size = 20, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      {PATHS[name].map((d, i) => <path key={i} d={d} />)}
+    </svg>
+  );
+}
+const Spinner = ({ size = 20 }) => <Icon name="loader" size={size} className="animate-spin" />;
+
+/* ---------- Constants & helpers ---------- */
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+const LS_KEY = "invox_api_key";
+const LS_HISTORY = "invox_history";
+
+const DEMO_DATA = {
+  vendor_name: "سوبر ماركت الأمل",
+  invoice_number: "INV-2026-00457",
+  date: "2026-11-20",
+  items: [
+    { name: "أرز مصري 5 كجم", quantity: 2, unit_price: 145, total: 290 },
+    { name: "زيت عباد الشمس 1.5 لتر", quantity: 3, unit_price: 98.5, total: 295.5 },
+    { name: "سكر أبيض 1 كجم", quantity: 4, unit_price: 32, total: 128 },
+    { name: "شاي ليبتون 100 كيس", quantity: 2, unit_price: 76, total: 152 },
+    { name: "لبن كامل الدسم 1 لتر", quantity: 6, unit_price: 38, total: 228 },
+  ],
+  tax: 150.5,
+  total_amount: 1244,
+};
+
+const PROMPT = `أنت نظام استخراج بيانات من الفواتير. حلّل صورة الفاتورة المرفقة (قد تكون بالعربية أو الإنجليزية أو كلتيهما) وأعد النتيجة بصيغة JSON فقط، بدون أي شرح أو علامات markdown، وبالهيكل التالي بالضبط:
+{
+  "vendor_name": "اسم المتجر أو الشركة",
+  "invoice_number": "رقم الفاتورة",
+  "date": "التاريخ بصيغة YYYY-MM-DD إن أمكن",
+  "items": [ { "name": "اسم الصنف", "quantity": 0, "unit_price": 0, "total": 0 } ],
+  "tax": 0,
+  "total_amount": 0
+}
+قواعد: الأرقام يجب أن تكون أرقاماً إنجليزية (0-9) من نوع number وليست نصوصاً. إذا لم تجد قيمة فاجعلها "" للنصوص و0 للأرقام. اكتب أسماء الأصناف كما تظهر في الفاتورة.`;
+
+const toNum = (v) => {
+  if (typeof v === "number") return isFinite(v) ? v : 0;
+  const s = String(v ?? "").replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[,٬]/g, "").replace(/٫/g, ".").replace(/[^\d.\-]/g, "");
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+};
+const fmt = (n) => (Math.round(toNum(n) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+function normalize(raw) {
+  const d = raw && typeof raw === "object" ? raw : {};
+  const items = Array.isArray(d.items) ? d.items : [];
+  return {
+    vendor_name: String(d.vendor_name ?? ""),
+    invoice_number: String(d.invoice_number ?? ""),
+    date: String(d.date ?? ""),
+    items: items.map((it) => {
+      const quantity = toNum(it?.quantity);
+      const unit_price = toNum(it?.unit_price);
+      const total = it?.total !== undefined && it?.total !== null && it?.total !== "" ? toNum(it.total) : quantity * unit_price;
+      return { name: String(it?.name ?? ""), quantity, unit_price, total };
+    }),
+    tax: toNum(d.tax),
+    total_amount: toNum(d.total_amount),
+  };
+}
+
+const readFileAsDataURL = (file) =>
+  new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+
+// Downscale big photos (phone cameras) so the request stays small and fast.
+function loadImageScaled(dataUrl, maxSide = 1800, quality = 0.88) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      const out = c.toDataURL("image/jpeg", quality);
+      // thumbnail for history
+      const t = document.createElement("canvas"); const ts = Math.min(1, 140 / Math.max(w, h));
+      t.width = Math.round(w * ts); t.height = Math.round(h * ts);
+      t.getContext("2d").drawImage(img, 0, 0, t.width, t.height);
+      resolve({ dataUrl: out, thumb: t.toDataURL("image/jpeg", 0.6) });
+    };
+    img.onerror = () => resolve({ dataUrl, thumb: "" });
+    img.src = dataUrl;
+  });
+}
+
+function csvEscape(v) {
+  const s = String(v ?? "");
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function buildCSV(d) {
+  const rows = [
+    ["اسم المتجر / الشركة", d.vendor_name],
+    ["رقم الفاتورة", d.invoice_number],
+    ["التاريخ", d.date],
+    ["الضريبة", d.tax],
+    ["المبلغ الإجمالي", d.total_amount],
+    [],
+    ["#", "اسم الصنف", "الكمية", "سعر الوحدة", "الإجمالي"],
+    ...d.items.map((it, i) => [i + 1, it.name, it.quantity, it.unit_price, it.total]),
+  ];
+  const body = rows.map((r) => r.map(csvEscape).join(",")).join("\r\n");
+  return "﻿" + body; // UTF-8 BOM so Excel shows Arabic correctly
+}
+
+async function downloadCSV(d) {
+  const csv = buildCSV(d);
+  const safe = (d.invoice_number || "invoice").replace(/[^\w؀-ۿ\-]+/g, "_");
+  const filename = `invox_${safe}.csv`;
+  // Preferred: platform downloads capability (when hosted as an artifact)
+  try {
+    const dl = window.claude && (await window.claude.use("downloads"));
+    if (dl) { await dl.save({ filename, data: csv }); return "saved"; }
+  } catch (e) {
+    if (e && e.code === "declined") return "declined";
+  }
+  // Standard browser download (works on Vercel / any normal host)
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return "saved";
+}
+
+function loadLS(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } }
+function saveLS(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch { return false; } }
+
+async function callGemini(apiKey, dataUrl) {
+  const [meta, b64] = dataUrl.split(",");
+  const mime = (meta.match(/data:(.*?);/) || [])[1] || "image/jpeg";
+  const res = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: mime, data: b64 } }] }],
+      generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
+    }),
+  });
+  if (!res.ok) {
+    let msg = "";
+    try { msg = (await res.json())?.error?.message || ""; } catch {}
+    if (res.status === 400 && /API key/i.test(msg)) throw new Error("مفتاح API غير صالح. تأكد منه من إعدادات API.");
+    if (res.status === 403) throw new Error("المفتاح غير مصرّح له بهذه الخدمة (403). تأكد من تفعيل Gemini API لمفتاحك.");
+    if (res.status === 429) throw new Error("تم تجاوز حد الاستخدام (429). انتظر قليلاً ثم أعد المحاولة.");
+    throw new Error(msg || `فشل الطلب (${res.status}).`);
+  }
+  const json = await res.json();
+  const text = json?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+  if (!text) throw new Error("لم يُرجع الذكاء الاصطناعي أي نتيجة. جرّب صورة أوضح.");
+  const clean = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  try { return JSON.parse(clean); }
+  catch { const m = clean.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error("تعذّر قراءة نتيجة الذكاء الاصطناعي."); }
+}
+
+/* ---------- UI pieces ---------- */
+function Field({ label, value, onChange, type = "text", ltr = false, accent = false }) {
+  return (
+    <label className={`block rounded-2xl border p-4 transition focus-within:ring-2 focus-within:ring-indigo-300 ${accent ? "bg-indigo-950 border-indigo-950" : "bg-white border-slate-200"}`}>
+      <span className={`text-xs font-semibold ${accent ? "text-indigo-200" : "text-slate-500"}`}>{label}</span>
+      <input
+        type={type} value={value} onChange={(e) => onChange(e.target.value)} dir={ltr ? "ltr" : "rtl"} step="any"
+        className={`mt-1 w-full bg-transparent outline-none font-bold text-lg ${ltr ? "text-right" : ""} ${accent ? "text-white placeholder-indigo-300" : "text-slate-900"}`}
+      />
+    </label>
+  );
+}
+
+function SettingsModal({ open, onClose, apiKey, onSave }) {
+  const [val, setVal] = useState(apiKey);
+  const [show, setShow] = useState(false);
+  useEffect(() => { if (open) { setVal(apiKey); setShow(false); } }, [open, apiKey]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm fade-in" onClick={onClose}>
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2"><Icon name="key" className="text-indigo-700" /> إعدادات API</h3>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500" aria-label="إغلاق"><Icon name="x" /></button>
+        </div>
+        <p className="text-sm text-slate-600 leading-7 mb-4">
+          أدخل مفتاح Google Gemini API. يُحفظ المفتاح في متصفحك فقط (LocalStorage) ولا يُرسل إلا إلى Google مباشرة.
+          يمكنك الحصول على مفتاح مجاني من <a className="text-indigo-700 font-bold underline" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio</a>.
+        </p>
+        <div className="relative">
+          <input
+            type={show ? "text" : "password"} dir="ltr" value={val} onChange={(e) => setVal(e.target.value)} placeholder="AIza..."
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 pl-12 text-left font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <button onClick={() => setShow(!show)} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-800" aria-label="إظهار/إخفاء">
+            <Icon name={show ? "eyeoff" : "eye"} size={18} />
+          </button>
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button onClick={() => { onSave(val.trim()); onClose(); }} className="flex-1 rounded-xl bg-indigo-950 hover:bg-indigo-900 text-white font-bold py-3 transition">حفظ</button>
+          {apiKey && (
+            <button onClick={() => { onSave(""); onClose(); }} className="rounded-xl border border-slate-300 text-slate-700 font-semibold px-4 hover:bg-slate-50">حذف المفتاح</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- App ---------- */
+function App() {
+  const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem(LS_KEY) || ""; } catch { return ""; } });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [image, setImage] = useState(null); // { dataUrl, thumb, name }
+  const [dragging, setDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const [history, setHistory] = useState(() => loadLS(LS_HISTORY, []));
+  const [currentId, setCurrentId] = useState(null);
+  const fileRef = useRef(null);
+  const camRef = useRef(null);
+  const resultRef = useRef(null);
+
+  const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+
+  const saveKey = (k) => {
+    setApiKey(k);
+    try { k ? localStorage.setItem(LS_KEY, k) : localStorage.removeItem(LS_KEY); } catch {}
+    showToast(k ? "تم حفظ مفتاح API" : "تم حذف المفتاح");
+  };
+
+  const handleFile = useCallback(async (file) => {
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { setError("الصيغ المدعومة: JPG و PNG و WEBP فقط."); return; }
+    setError("");
+    try {
+      const raw = await readFileAsDataURL(file);
+      const scaled = await loadImageScaled(raw);
+      setImage({ ...scaled, name: file.name });
+      setData(null); setCurrentId(null);
+    } catch { setError("تعذّر قراءة الصورة."); }
+  }, []);
+
+  const onDrop = (e) => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files?.[0]); };
+
+  const persist = (d, thumb, id) => {
+    const entry = { id: id || Date.now(), savedAt: new Date().toISOString(), thumb: thumb || "", data: d };
+    setHistory((prev) => {
+      const next = [entry, ...prev.filter((h) => h.id !== entry.id)].slice(0, 20);
+      saveLS(LS_HISTORY, next);
+      return next;
+    });
+    setCurrentId(entry.id);
+    return entry.id;
+  };
+
+  const scrollToResult = () => setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+
+  const extract = async () => {
+    setError("");
+    if (!image) { setError("ارفع صورة فاتورة أولاً."); return; }
+    if (!apiKey) { setError("أضف مفتاح Gemini API من زر «إعدادات API» أولاً، أو جرّب الفاتورة الافتراضية."); setSettingsOpen(true); return; }
+    setLoading(true);
+    try {
+      const raw = await callGemini(apiKey, image.dataUrl);
+      const d = normalize(raw);
+      setData(d); persist(d, image.thumb); scrollToResult();
+    } catch (e) {
+      if (e instanceof TypeError) setError("تعذّر الاتصال بخدمة Gemini (الشبكة أو سياسة الأمان في بيئة العرض). انشر التطبيق على Vercel أو شغّله محلياً ثم أعد المحاولة، أو جرّب «تجربة بفاتورة افتراضية».");
+      else setError(e.message || "حدث خطأ غير متوقع.");
+    } finally { setLoading(false); }
+  };
+
+  const loadDemo = () => {
+    setError("");
+    const d = normalize(DEMO_DATA);
+    setData(d); persist(d, ""); scrollToResult();
+  };
+
+  // editing helpers
+  const update = (patch) => {
+    setData((prev) => {
+      const next = { ...prev, ...patch };
+      if (currentId) {
+        setHistory((h) => { const n = h.map((x) => (x.id === currentId ? { ...x, data: next } : x)); saveLS(LS_HISTORY, n); return n; });
+      }
+      return next;
+    });
+  };
+  const updateItem = (i, key, value) => {
+    const items = data.items.map((it, idx) => {
+      if (idx !== i) return it;
+      const n = { ...it, [key]: key === "name" ? value : value };
+      if (key === "quantity" || key === "unit_price") n.total = Math.round(toNum(n.quantity) * toNum(n.unit_price) * 100) / 100;
+      return n;
+    });
+    update({ items });
+  };
+  const addItem = () => update({ items: [...data.items, { name: "", quantity: 1, unit_price: 0, total: 0 }] });
+  const removeItem = (i) => update({ items: data.items.filter((_, idx) => idx !== i) });
+
+  const itemsSum = data ? data.items.reduce((s, it) => s + toNum(it.total), 0) : 0;
+
+  const exportCSV = async () => {
+    const r = await downloadCSV({
+      ...data,
+      tax: toNum(data.tax), total_amount: toNum(data.total_amount),
+      items: data.items.map((it) => ({ ...it, quantity: toNum(it.quantity), unit_price: toNum(it.unit_price), total: toNum(it.total) })),
+    });
+    if (r === "saved") showToast("تم تجهيز ملف CSV للتحميل");
+  };
+
+  const openHistory = (h) => { setData(normalize(h.data)); setCurrentId(h.id); setImage(null); scrollToResult(); };
+  const deleteHistory = (id) => setHistory((p) => { const n = p.filter((h) => h.id !== id); saveLS(LS_HISTORY, n); if (id === currentId) setCurrentId(null); return n; });
+  const clearHistory = () => { setHistory([]); saveLS(LS_HISTORY, []); setCurrentId(null); };
+
+  return (
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-950 to-indigo-600 text-white grid place-items-center shadow">
+              <Icon name="file" size={22} />
+            </div>
+            <div className="leading-tight">
+              <div className="text-xl font-extrabold text-indigo-950 tracking-tight">Invox <span className="text-slate-300 font-light">|</span> إنفوكس</div>
+              <div className="text-[11px] text-slate-500 hidden sm:block">من صورة الفاتورة إلى جدول إكسل في ثوانٍ</div>
+            </div>
+          </div>
+          <button onClick={() => setSettingsOpen(true)}
+            className={`flex items-center gap-2 rounded-xl border px-3 sm:px-4 py-2 text-sm font-bold transition ${apiKey ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
+            <Icon name="key" size={18} />
+            <span>إعدادات API</span>
+            {apiKey && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+        {/* Hero */}
+        <section className="text-center space-y-2">
+          <h1 className="text-2xl sm:text-4xl font-extrabold text-indigo-950">حوّل فواتيرك إلى بيانات منظمة</h1>
+          <p className="text-slate-600 max-w-xl mx-auto leading-7">ارفع صورة الفاتورة، ودع الذكاء الاصطناعي يستخرج المتجر والأصناف والضريبة والإجمالي، ثم عدّلها وصدّرها لإكسل.</p>
+        </section>
+
+        {/* Upload */}
+        <section className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-7">
+          {!image ? (
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              onClick={() => fileRef.current?.click()}
+              className={`cursor-pointer rounded-2xl border-2 border-dashed p-8 sm:p-12 text-center transition ${dragging ? "border-indigo-500 bg-indigo-50" : "border-slate-300 bg-slate-50 hover:border-indigo-400 hover:bg-indigo-50/50"}`}
+            >
+              <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-100 text-indigo-800 grid place-items-center mb-4"><Icon name="upload" size={30} /></div>
+              <p className="font-bold text-lg text-slate-900">اسحب صورة الفاتورة وأفلتها هنا</p>
+              <p className="text-sm text-slate-500 mt-1">أو اضغط للاختيار من جهازك — JPG, PNG, WEBP</p>
+              <div className="flex flex-wrap justify-center gap-3 mt-6" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 rounded-xl bg-indigo-950 text-white font-bold px-5 py-2.5 hover:bg-indigo-900 transition">
+                  <Icon name="image" size={18} /> اختيار صورة
+                </button>
+                <button onClick={() => camRef.current?.click()} className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white text-slate-800 font-bold px-5 py-2.5 hover:bg-slate-50 transition">
+                  <Icon name="camera" size={18} /> التقاط بالكاميرا
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-[260px,1fr] gap-6 items-start fade-in">
+              <div className="rounded-2xl border border-slate-200 bg-slate-100 overflow-hidden">
+                <img src={image.dataUrl} alt="معاينة الفاتورة" className="w-full max-h-[420px] object-contain bg-white" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <div className="text-xs font-semibold text-slate-500">الصورة المرفوعة</div>
+                  <div className="font-bold text-slate-900 break-all" dir="ltr" style={{ textAlign: "right" }}>{image.name}</div>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50"><Icon name="upload" size={17} /> تغيير الصورة</button>
+                  <button onClick={() => camRef.current?.click()} className="flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 sm:hidden"><Icon name="camera" size={17} /> كاميرا</button>
+                  <button onClick={() => { setImage(null); setError(""); }} className="flex items-center gap-2 rounded-xl border border-red-200 text-red-700 px-4 py-2 font-semibold hover:bg-red-50"><Icon name="trash" size={17} /> حذف</button>
+                </div>
+              </div>
+            </div>
+          )}
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }} />
+          <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }} />
+
+          {error && (
+            <div className="mt-5 flex gap-3 rounded-2xl border border-red-200 bg-red-50 text-red-800 p-4 text-sm leading-7 fade-in">
+              <Icon name="alert" className="shrink-0 mt-1" size={18} /> <span>{error}</span>
+            </div>
+          )}
+
+          <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <button onClick={extract} disabled={loading}
+              className="flex-1 flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-l from-indigo-700 to-indigo-950 text-white font-extrabold text-lg py-4 shadow-lg shadow-indigo-900/20 hover:brightness-110 active:scale-[.99] transition disabled:opacity-70 disabled:cursor-wait">
+              {loading ? <><Spinner size={22} /> جارٍ تحليل الفاتورة...</> : <><Icon name="sparkles" size={22} /> استخراج البيانات بالذكاء الاصطناعي</>}
+            </button>
+            <button onClick={loadDemo} disabled={loading}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white text-slate-700 text-sm font-bold px-4 py-3 hover:bg-slate-50 transition">
+              <Icon name="flask" size={17} /> تجربة بفاتورة افتراضية
+            </button>
+          </div>
+        </section>
+
+        {/* Results */}
+        {data && (
+          <section ref={resultRef} className="space-y-5 fade-in scroll-mt-24">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <h2 className="text-xl font-extrabold text-indigo-950">البيانات المستخرجة</h2>
+              <span className="text-xs text-slate-500">يمكنك تعديل أي خانة مباشرةً</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Field label="اسم المتجر / الشركة" value={data.vendor_name} onChange={(v) => update({ vendor_name: v })} />
+              <Field label="رقم الفاتورة" value={data.invoice_number} onChange={(v) => update({ invoice_number: v })} ltr />
+              <Field label="التاريخ" value={data.date} onChange={(v) => update({ date: v })} ltr />
+              <Field label="قيمة الضريبة" type="number" value={data.tax} onChange={(v) => update({ tax: v })} ltr />
+              <div className="sm:col-span-1 lg:col-span-2">
+                <Field label="المبلغ الإجمالي" type="number" value={data.total_amount} onChange={(v) => update({ total_amount: v })} ltr accent />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 flex items-center justify-between border-b border-slate-100">
+                <h3 className="font-extrabold text-slate-900">الأصناف <span className="text-slate-400 font-semibold">({data.items.length})</span></h3>
+                <button onClick={addItem} className="flex items-center gap-1.5 text-sm font-bold text-indigo-800 hover:bg-indigo-50 rounded-lg px-3 py-1.5"><Icon name="plus" size={16} /> إضافة صنف</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="p-3 text-right w-10">#</th>
+                      <th className="p-3 text-right">اسم الصنف</th>
+                      <th className="p-3 text-right w-24">الكمية</th>
+                      <th className="p-3 text-right w-32">سعر الوحدة</th>
+                      <th className="p-3 text-right w-32">الإجمالي</th>
+                      <th className="p-3 w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.items.map((it, i) => (
+                      <tr key={i} className="border-t border-slate-100 hover:bg-slate-50/60">
+                        <td className="p-3 text-slate-400">{i + 1}</td>
+                        <td className="p-2"><input value={it.name} onChange={(e) => updateItem(i, "name", e.target.value)} className="w-full rounded-lg px-2 py-2 bg-transparent outline-none focus:bg-white focus:ring-2 focus:ring-indigo-300" /></td>
+                        <td className="p-2"><input type="number" step="any" dir="ltr" value={it.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} className="w-full rounded-lg px-2 py-2 bg-transparent outline-none text-right focus:bg-white focus:ring-2 focus:ring-indigo-300" /></td>
+                        <td className="p-2"><input type="number" step="any" dir="ltr" value={it.unit_price} onChange={(e) => updateItem(i, "unit_price", e.target.value)} className="w-full rounded-lg px-2 py-2 bg-transparent outline-none text-right focus:bg-white focus:ring-2 focus:ring-indigo-300" /></td>
+                        <td className="p-2"><input type="number" step="any" dir="ltr" value={it.total} onChange={(e) => updateItem(i, "total", e.target.value)} className="w-full rounded-lg px-2 py-2 bg-transparent outline-none text-right font-bold focus:bg-white focus:ring-2 focus:ring-indigo-300" /></td>
+                        <td className="p-2 text-center"><button onClick={() => removeItem(i)} className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50" aria-label="حذف الصنف"><Icon name="trash" size={16} /></button></td>
+                      </tr>
+                    ))}
+                    {data.items.length === 0 && (
+                      <tr><td colSpan="6" className="p-8 text-center text-slate-400">لا توجد أصناف. أضف صنفاً يدوياً.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 text-sm text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
+                <span>مجموع الأصناف: <b className="text-slate-900" dir="ltr">{fmt(itemsSum)}</b></span>
+                <span>الضريبة: <b className="text-slate-900" dir="ltr">{fmt(data.tax)}</b></span>
+                {Math.abs(itemsSum + toNum(data.tax) - toNum(data.total_amount)) > 0.01 && (
+                  <span className="text-amber-700">⚠ مجموع الأصناف + الضريبة لا يساوي الإجمالي — راجع الأرقام.</span>
+                )}
+              </div>
+            </div>
+
+            <button onClick={exportCSV}
+              className="w-full flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-lg py-4 shadow-lg shadow-emerald-900/10 transition active:scale-[.99]">
+              <Icon name="download" size={22} /> تحميل كملف Excel (CSV)
+            </button>
+          </section>
+        )}
+
+        {/* History */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-extrabold text-indigo-950 flex items-center gap-2"><Icon name="clock" className="text-indigo-700" /> سجل الفواتير المحفوظة</h2>
+            {history.length > 0 && <button onClick={clearHistory} className="text-sm font-semibold text-red-600 hover:underline">مسح السجل</button>}
+          </div>
+          {history.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500 text-sm">لا توجد فواتير محفوظة بعد. ستظهر هنا آخر الفواتير التي تحلّلها.</div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-3">
+              {history.map((h) => (
+                <div key={h.id} className={`flex items-center gap-3 rounded-2xl border bg-white p-3 transition ${h.id === currentId ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-300"}`}>
+                  <button onClick={() => openHistory(h)} className="flex items-center gap-3 flex-1 min-w-0 text-right">
+                    <div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden grid place-items-center shrink-0 text-slate-400">
+                      {h.thumb ? <img src={h.thumb} alt="" className="w-full h-full object-cover" /> : <Icon name="file" size={22} />}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 truncate">{h.data.vendor_name || "بدون اسم"}</div>
+                      <div className="text-xs text-slate-500 truncate" dir="ltr" style={{ textAlign: "right" }}>{h.data.invoice_number || "—"} · {h.data.date || "—"}</div>
+                      <div className="text-sm font-extrabold text-indigo-900" dir="ltr" style={{ textAlign: "right" }}>{fmt(h.data.total_amount)}</div>
+                    </div>
+                  </button>
+                  <button onClick={() => deleteHistory(h.id)} className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50" aria-label="حذف"><Icon name="trash" size={17} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
+
+      <footer className="text-center text-xs text-slate-400 py-8">Invox | إنفوكس — بياناتك تبقى في متصفحك ولا تُحفظ على أي خادم.</footer>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} apiKey={apiKey} onSave={saveKey} />
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-indigo-950 text-white text-sm font-semibold rounded-xl px-4 py-3 shadow-xl fade-in">
+          <Icon name="check" size={16} /> {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
